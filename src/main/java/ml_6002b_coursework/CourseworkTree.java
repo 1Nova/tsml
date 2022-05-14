@@ -2,8 +2,12 @@ package ml_6002b_coursework;
 
 import weka.classifiers.AbstractClassifier;
 import weka.core.*;
+import weka.core.converters.ConverterUtils;
+import weka.filters.Filter;
+import weka.filters.supervised.instance.StratifiedRemoveFolds;
 
 import java.util.Arrays;
+import java.util.Random;
 
 /**
  * A basic decision tree classifier for use in machine learning coursework (6002B).
@@ -18,6 +22,33 @@ public class CourseworkTree extends AbstractClassifier {
 
     /** The root node of the tree. */
     private TreeNode root;
+
+    //function to set options:
+    //we'll simply use the later defined setAttSplitMeasure() method
+    @Override
+    public void setOptions(String[] options) {
+        for (String option: options){
+            //cast to lower case: we don't want to handle lots of different input variations!
+            switch (option.toLowerCase()) {
+                case "gain":
+                    //use constructor to set gain args, via useGain boolean
+                    setAttSplitMeasure(new IGAttributeSplitMeasure(true));
+                    break;
+                case "ratio":
+                    //use constructor to set ratio args, via useGain boolean
+                    setAttSplitMeasure(new IGAttributeSplitMeasure(false));
+                    break;
+                case "chi":
+                    setAttSplitMeasure(new ChiSquaredAttributeSplitMeasure());
+                case "gini":
+                    setAttSplitMeasure(new GiniAttributeSplitMeasure());
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
 
     /**
      * Sets the attribute split measure for the classifier.
@@ -138,7 +169,11 @@ public class CourseworkTree extends AbstractClassifier {
 
             // Loop through each attribute, finding the best one.
             for (int i = 0; i < data.numAttributes() - 1; i++) {
-                double gain = attSplitMeasure.computeAttributeQuality(data, data.attribute(i));
+                double gain;
+
+                gain = attSplitMeasure.computeAttributeQuality(data, data.attribute(i));
+
+                //System.out.println("gain:" + gain);
 
                 if (gain > bestGain) {
                     bestSplit = data.attribute(i);
@@ -146,9 +181,22 @@ public class CourseworkTree extends AbstractClassifier {
                 }
             }
 
+            //System.out.println(bestSplit);
+
+
             // If we found an attribute to split on, create child nodes.
             if (bestSplit != null) {
-                Instances[] split = attSplitMeasure.splitData(data, bestSplit);
+                Instances[] split = new Instances[0];
+
+                //if type numeric, use on numeric method
+                //todo maybe use .type() == 0   OR use .isNumeric()
+                if (bestSplit.isNumeric()){
+                    split = attSplitMeasure.splitDataOnNumeric(data, bestSplit);
+                }
+                //if nominal, use normal method
+                else if (bestSplit.isNominal()){
+                    split = attSplitMeasure.splitData(data, bestSplit);
+                }
                 children = new TreeNode[split.length];
 
                 // Create a child for each value in the selected attribute, and determine whether it is a leaf or not.
@@ -192,8 +240,22 @@ public class CourseworkTree extends AbstractClassifier {
             // If the node is a leaf return the distribution, else select the next node based on the best attributes
             // value.
             if (bestSplit == null) {
+                //System.out.println("bestsplit null");
                 return leafDistribution;
             } else {
+                //if numeric
+                if (bestSplit.isNumeric()){
+                    //System.out.println(attSplitMeasure.getRandom());
+                    //System.out.println("numeric cwtree 248");
+                    if(inst.value(bestSplit) <= attSplitMeasure.getRandom()){
+                        return children[1].distributionForInstance(inst);
+                    }
+                    //if nominal
+                    else{
+                        //System.out.println("nominal cwtree 254");
+                        return children[0].distributionForInstance(inst);
+                    }
+                }
                 return children[(int) inst.value(bestSplit)].distributionForInstance(inst);
             }
         }
@@ -245,7 +307,91 @@ public class CourseworkTree extends AbstractClassifier {
      *
      * @param args the options for the classifier main
      */
-    public static void main(String[] args) {
-        System.out.println("Not Implemented.");
+    public static void main(String[] args) throws Exception {
+
+        // Read all the instances in the file (ARFF, CSV, XRFF, ...)
+        ConverterUtils.DataSource optdigitsSource =
+                new ConverterUtils.DataSource("src/main/java/ml_6002b_coursework/test_data/optdigits.arff");
+        ConverterUtils.DataSource chinaSource =
+                new ConverterUtils.DataSource("src/main/java/ml_6002b_coursework/test_data/Chinatown.arff");
+
+        // Optdigits
+        System.out.println("DT using measure 'Information Gain' on optdigits problem has test accuracy = " + accuracyMetrics(optdigitsSource, new IGAttributeSplitMeasure(true)));
+        System.out.println("hi");
+        //System.out.println("DT using measure 'Information Gain Ratio' on optdigits problem has test accuracy = " + accuracyMetrics(optdigitsSource, new IGAttributeSplitMeasure(false)));
+        System.out.println("DT using measure 'Chi Squared' on optdigits problem has test accuracy = " + accuracyMetrics(optdigitsSource, new ChiSquaredAttributeSplitMeasure()));
+        System.out.println("DT using measure 'Gini Index' on optdigits problem has test accuracy = " + accuracyMetrics(optdigitsSource, new GiniAttributeSplitMeasure()));
+
+        // chinaTowns
+        System.out.println("\nDT using measure 'Information Gain' on Chinatown problem has test accuracy = " + accuracyMetrics(chinaSource, new IGAttributeSplitMeasure(true)));
+        System.out.println("DT using measure 'Information Gain Ratio' on Chinatown problem has test accuracy = " + accuracyMetrics(chinaSource, new IGAttributeSplitMeasure(false)));
+        System.out.println("DT using measure 'Chi Squared' on Chinatown problem has test accuracy = " + accuracyMetrics(chinaSource, new ChiSquaredAttributeSplitMeasure()));
+        System.out.println("DT using measure 'Gini Index' on Chinatown problem has test accuracy = " + accuracyMetrics(chinaSource, new GiniAttributeSplitMeasure()));
+
+    }
+
+    public static double accuracyMetrics(ConverterUtils.DataSource source, AttributeSplitMeasure asm) throws Exception {
+
+        Instances instances = source.getDataSet();
+
+        // Make the last attribute be the class
+        instances.setClassIndex(instances.numAttributes() - 1);
+
+
+        //randomly split data
+        StratifiedRemoveFolds filter = new StratifiedRemoveFolds();
+
+        // -V
+        //  Specifies if inverse of selection is to be output.
+        //
+        // -N <number of folds>
+        //  Specifies number of folds dataset is split into.
+        //  (default 10)
+        //
+        // -F <fold>
+        //  Specifies which fold is selected. (default 1)
+        //
+        // -S <seed>
+        //  Specifies random number seed. (default 0, no randomizing)
+        String[] options = new String[6];
+        Random rand = new Random();
+        int seed = rand.nextInt(5000)+1;
+
+        options[0] = "-N"; //number of folds (default is 10)
+        options[1] = Integer.toString(5);
+        options[2] = "-S"; //random number seed (default = 0, no randomisation)
+        options[3] = Integer.toString(seed);
+        options[4] = "-F"; //selected fold
+        options[5] = Integer.toString(1);
+
+        filter.setOptions(options); //apply options defined above
+        filter.setInputFormat(instances); //define instances to be used
+        filter.setInvertSelection(false);
+
+        //filter for test data
+        Instances testData = Filter.useFilter(instances, filter);
+
+        //apply filter for training data instead now
+        filter.setInvertSelection(true);
+        Instances trainData = Filter.useFilter(instances, filter);
+
+        CourseworkTree tree = new CourseworkTree();
+
+        tree.setAttSplitMeasure(asm);
+
+        //build using training data
+        tree.buildClassifier(trainData);
+
+        double correct = 0.0, total = 0.0;
+        //test using test data
+        for (Instance instance:testData){
+            double prediction = tree.classifyInstance(instance);
+            if (instance.classValue() == prediction){
+                correct+=1;
+            }
+            total+=1;
+        }
+        double accuracy = correct/total;
+        return accuracy;
     }
 }
