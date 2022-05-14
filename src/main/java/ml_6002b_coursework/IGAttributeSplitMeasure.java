@@ -98,7 +98,7 @@ public class IGAttributeSplitMeasure extends AttributeSplitMeasure {
 
         int count = data.numClasses();
         int value = att.numValues();
-
+        System.out.println("test");
         if(att.isNumeric()){
             Instances[] splitData = splitDataOnNumeric(data,att);
             int[][] contingencyTable = new int[2][count];
